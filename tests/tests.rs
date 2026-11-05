@@ -700,6 +700,31 @@ mod frame {
     }
 
     #[test]
+    fn empty_blocks() {
+        // Data blocks that decompress to nothing are valid and don't end the frame: an
+        // uncompressed block of size 0 (block size 0x80000000) and a compressed block holding a
+        // single 0x00 token. Only a block size of 0 is the EndMark.
+        let mut frame_info = lz4_flex::frame::FrameInfo::new();
+        frame_info.content_checksum = true;
+        let frame = lz4_flex_frame_compress_with(frame_info, b"abc").unwrap();
+        // magic number, FLG, BD and header checksum
+        let header_len = 7;
+        for empty_block in [&[0, 0, 0, 0x80][..], &[1, 0, 0, 0, 0x00][..]] {
+            let mut input = frame[..header_len].to_vec();
+            input.extend_from_slice(empty_block);
+            input.extend_from_slice(&frame[header_len..]);
+            assert_eq!(lz4_flex_frame_decompress(&input).unwrap(), b"abc");
+
+            // The content checksum after the empty block is still verified.
+            *input.last_mut().unwrap() ^= 0xFF;
+            match lz4_flex_frame_decompress(&input) {
+                Err(lz4_flex::frame::Error::ContentChecksumError) => (),
+                r => panic!("{:?}", r),
+            }
+        }
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore)]
     fn block_size() {
         let mut last_compressed_len = usize::MAX;

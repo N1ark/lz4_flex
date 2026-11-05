@@ -186,7 +186,11 @@ impl<R: io::Read> FrameDecoder<R> {
         Ok(())
     }
 
-    fn read_block(&mut self) -> io::Result<usize> {
+    /// Reads and decompresses the next block.
+    ///
+    /// Returns the number of decompressed bytes, which can be 0 for an empty data block, or
+    /// `None` at the end of the frame or the end of the input.
+    fn read_block(&mut self) -> io::Result<Option<usize>> {
         debug_assert_eq!(self.dst_start, self.dst_end);
         let frame_info = self.current_frame_info.as_ref().unwrap();
 
@@ -232,7 +236,7 @@ impl<R: io::Read> FrameDecoder<R> {
             let mut buffer = [0u8; 4];
             if let Err(err) = self.r.read_exact(&mut buffer) {
                 if err.kind() == ErrorKind::UnexpectedEof {
-                    return Ok(0);
+                    return Ok(None);
                 } else {
                     return Err(err);
                 }
@@ -328,7 +332,7 @@ impl<R: io::Read> FrameDecoder<R> {
                     }
                 }
                 self.current_frame_info = None;
-                return Ok(0);
+                return Ok(None);
             }
         }
 
@@ -338,14 +342,21 @@ impl<R: io::Read> FrameDecoder<R> {
                 .write(&self.dst[self.dst_start..self.dst_end]);
         }
 
-        Ok(self.dst_end - self.dst_start)
+        Ok(Some(self.dst_end - self.dst_start))
     }
 
     fn read_more(&mut self) -> io::Result<usize> {
         if self.current_frame_info.is_none() && self.read_frame_info()? == 0 {
             return Ok(0);
         }
-        self.read_block()
+        loop {
+            match self.read_block()? {
+                // An empty data block doesn't end the frame, unlike the EndMark.
+                Some(0) => continue,
+                Some(len) => return Ok(len),
+                None => return Ok(0),
+            }
+        }
     }
 }
 
