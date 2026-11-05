@@ -67,7 +67,9 @@ unsafe fn duplicate_overlapping(
     unsafe {
         let dst_ptr_end = output_ptr.add(match_length);
 
-        while output_ptr.add(1) < dst_ptr_end {
+        // `wrapping_add`: when the match ends at the end of the output buffer, the last check is
+        // done with `output_ptr == dst_ptr_end`, and `add(1)` would point two past the end.
+        while output_ptr.wrapping_add(1) < dst_ptr_end {
             // Note that this loop unrolling is done, so that the compiler doesn't do it in a awful
             // way.
             // Without that the compiler will unroll/auto-vectorize the copy with a lot of branches.
@@ -628,6 +630,17 @@ mod test {
             decompress(&[0x40, 0, 0, 0, 0, 255, 0, 0x70, 0, 0, 0, 0, 0, 0, 0], 256),
             Err(DecompressError::OffsetOutOfBounds)
         ));
+    }
+
+    #[test]
+    fn overlapping_match_at_end_of_output() {
+        // 4 literals, then a match of length 4 at offset 1 that ends exactly at the end of the
+        // output, then an empty last sequence.
+        let input = [0x40, 0, 0, 0, 0, 1, 0, 0x00];
+        let mut output = [0xFF; 8];
+        assert_eq!(decompress_into(&input, &mut output).unwrap(), 8);
+        assert_eq!(output, [0; 8]);
+        assert_eq!(decompress(&input, 8).unwrap(), [0; 8]);
     }
 
     #[test]
